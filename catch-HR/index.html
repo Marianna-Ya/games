@@ -225,6 +225,42 @@
   }
   @keyframes blink { 50% { opacity: 0.25; } }
   .blink { animation: blink 1s steps(1) infinite; }
+  /* ---------- СЕНСОРНОЕ УПРАВЛЕНИЕ (только на тач-устройствах) ---------- */
+  #touch { display: none; }
+  @media (pointer: coarse) {
+    #touch {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      position: absolute; left: 0; right: 0; bottom: 0;
+      padding: 0 3% 3%; pointer-events: none; z-index: 22;
+    }
+    .tbtns { display: flex; gap: 0.7em; }
+    .tbtn {
+      width: 3.4em; height: 3.4em; pointer-events: auto;
+      background: rgba(22,22,58,0.72); color: var(--teal);
+      border: 0.14em solid var(--teal); border-radius: 0.4em;
+      font-size: 1.3em; font-weight: bold;
+      display: flex; align-items: center; justify-content: center;
+      user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tbtn:active { background: rgba(0,200,207,0.4); }
+    #btnFire {
+      width: 4.6em; height: 4.6em; font-size: 0.85em;
+      color: var(--yellow); border-color: var(--yellow);
+    }
+    #help { display: none; }   /* на тач-устройствах подсказку с клавишами прячем */
+  }
+  /* Подсказка повернуть телефон, если экран вертикальный */
+  #rotate { display: none; }
+  @media (orientation: portrait) and (pointer: coarse) {
+    #rotate {
+      display: flex; position: fixed; inset: 0; z-index: 200;
+      background: var(--bg); color: var(--ink);
+      align-items: center; justify-content: center; text-align: center;
+      padding: 10%; font-size: 1.15em; line-height: 1.6;
+    }
+    #touch { display: none; } /* в портрете кнопки не показываем */
+  }
 </style>
 </head>
 <body>
@@ -296,6 +332,17 @@
         <h2>Дорогой соискатель!</h2>
         <div id="modalText"></div>
         <button id="restartBtn">Отправить ещё 100 откликов</button>
+      </div>
+    </div>
+
+    <!-- Экранные кнопки управления (видны только на тач-устройствах) -->
+    <div id="touch">
+      <div class="tbtns">
+        <button class="tbtn" id="btnLeft" aria-label="Влево">◀</button>
+        <button class="tbtn" id="btnRight" aria-label="Вправо">▶</button>
+      </div>
+      <div class="tbtns">
+        <button class="tbtn" id="btnFire" aria-label="Отправить тестовое">PPTX</button>
       </div>
     </div>
 
@@ -607,6 +654,7 @@ let officeFar = 0, officeNear = 0;
 let typeTimer = null;
 
 const keys = { left: false, right: false };
+let firing = false; // удержание кнопки «огонь» на тач-устройствах
 
 /* =====================================================================
    МАСШТАБИРОВАНИЕ ПОД ОКНО
@@ -666,7 +714,25 @@ window.addEventListener("keyup", (e) => {
   }
 });
 // Потеря фокуса окна — сброс клавиш (защита от «залипания»)
-window.addEventListener("blur", () => { keys.left = false; keys.right = false; });
+window.addEventListener("blur", () => { keys.left = false; keys.right = false; firing = false; });
+
+// --- Сенсорное управление: те же действия, что и с клавиатуры ---
+function bindHold(id, onDown, onUp) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const down = (e) => { e.preventDefault(); userGesture(); onDown(); };
+  const up   = (e) => { e.preventDefault(); onUp(); };
+  el.addEventListener("touchstart", down, { passive: false });
+  el.addEventListener("touchend",   up,   { passive: false });
+  el.addEventListener("touchcancel", up,  { passive: false });
+  // дубль для мыши — чтобы кнопки работали и при отладке на десктопе
+  el.addEventListener("mousedown", down);
+  el.addEventListener("mouseup",   up);
+  el.addEventListener("mouseleave", up);
+}
+bindHold("btnLeft",  () => keys.left = true,  () => keys.left = false);
+bindHold("btnRight", () => keys.right = true, () => keys.right = false);
+bindHold("btnFire",  () => firing = true,     () => firing = false);
 
 /* =====================================================================
    ОБНОВЛЕНИЕ ДАШБОРДА
@@ -869,6 +935,7 @@ function update(dt) {
   if (combo > 0 && now - lastHitTime > COMBO_WINDOW) combo = 0;
 
   // --- Движение игрока ---
+  if (firing) shoot();   // удержание экранной кнопки «огонь» (кулдаун внутри shoot)
   const PLAYER_SPEED = 2.4;
   if (keys.left)  player.x -= PLAYER_SPEED * dt;
   if (keys.right) player.x += PLAYER_SPEED * dt;
@@ -1162,5 +1229,8 @@ resize();
 startGame();
 requestAnimationFrame(loop);
 </script>
+  <!-- Подсказка повернуть телефон (показывается только в портрете на тач) -->
+  <div id="rotate">Поверни телефон горизонтально, чтобы играть</div>
+
 </body>
 </html>
