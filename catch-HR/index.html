@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ПОЙМАЙ HR — симулятор поиска работы для дизайнеров</title>
+<style>
+  /* ===================================================================
+     ВИЗУАЛЬНЫЙ СТИЛЬ
+     Ретро-аркада в духе Dendy/NES: тёмный фон, ограниченная палитра,
+     «пиксельный» моноширинный шрифт (системный fallback, без внешних).
+     Игровое поле рисуется на <canvas>, а HUD/баннеры/модалка — это
+     HTML-слои поверх канваса (так русский текст остаётся читаемым).
+     =================================================================== */
+
+  :root {
+    /* Ограниченная палитра */
+    --bg:     #0d0d2b;   /* основной тёмный фон / «леттербокс» по краям */
+    --panel:  #16163a;   /* плашки дашборда */
+    --line:   #2b2b5c;   /* разделители */
+    --ink:    #e6e6ff;   /* светлый текст */
+    --white:  #ffffff;
+    --red:    #e23636;   /* акцент: тревога, тестовые, тире */
+    --yellow: #f7d51d;   /* «аркадный» жёлтый — заголовки */
+    --green:  #5fcf5f;   /* KPI выполнены */
+    --teal:   #00c8cf;   /* цвет рубашки игрока-дизайнера */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    overflow: hidden;
+    font-family: "Courier New", "Lucida Console", Consolas, monospace;
+    color: var(--ink);
+    user-select: none; -webkit-user-select: none;
+    touch-action: none;
+  }
+
+  #game {
+    position: absolute; left: 0; top: 0;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+
+  /* Слой HTML-оверлеев, всегда совпадающий с областью канваса */
+  #field {
+    position: absolute;
+    pointer-events: none;     /* клики проходят сквозь, кроме кнопок */
+    overflow: hidden;
+  }
+
+  /* ---------- ВЕРХНИЙ ДАШБОРД (HUD) ---------- */
+  #hud {
+    position: absolute; left: 0; top: 0; width: 100%;
+    display: flex; flex-direction: column; gap: 0.5em;
+    padding: 1.6% 2% 1.2%;
+    background: var(--panel);
+    border-bottom: 0.18em solid var(--line);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    z-index: 10;
+  }
+  .hud-stats { display: flex; gap: 2%; }
+  .stat { flex: 1; line-height: 1.25; }
+  .stat .label { color: #8a8ad6; font-size: 0.7em; }
+  .stat .value { color: var(--yellow); font-weight: bold; }
+  .stat.offers .value { color: var(--red); }   /* офферов всегда 0 — главная шутка */
+
+  /* Тонкий прогресс-бар: путь до «решения» (ровно 15 шагов) */
+  .hud-progress .plabel {
+    display: flex; justify-content: space-between;
+    font-size: 0.62em; color: #8a8ad6; margin-bottom: 0.3em;
+  }
+  .hud-progress #pCount { color: var(--teal); }
+  .hud-progress .ptrack {
+    height: 0.55em; background: var(--bg);
+    border: 0.12em solid var(--line); overflow: hidden;
+  }
+  .hud-progress .pfill {
+    height: 100%; width: 0%; background: var(--teal);
+    transition: width 0.25s steps(5);
+  }
+
+  /* ---------- ТИКЕР КОРПОРАТИВНЫХ ИВЕНТОВ ---------- */
+  #event {
+    position: absolute; left: 50%; top: 20%;
+    transform: translateX(-50%);
+    display: none;
+    padding: 0.4em 0.8em;
+    background: var(--red); color: var(--white);
+    font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em;
+    white-space: nowrap; z-index: 12;
+  }
+  #event.show { display: block; }
+
+  /* ---------- ВСПЛЫВАЮЩАЯ ФРАЗА HR (на 1.5 сек) ---------- */
+  #phrase {
+    position: absolute; left: 50%; top: 27%;
+    transform: translateX(-50%); width: 86%;
+    text-align: center; color: var(--white);
+    background: rgba(13, 13, 43, 0.85);
+    border: 0.16em solid var(--teal);
+    padding: 0.6em 0.8em; line-height: 1.3;
+    opacity: 0; transition: opacity 0.15s; z-index: 14;
+  }
+  #phrase.show { opacity: 1; }
+
+  /* ---------- ИНДИКАТОР КОМБО ---------- */
+  #combo {
+    position: absolute; left: 50%; top: 40%;
+    transform: translateX(-50%);
+    text-align: center; color: var(--yellow);
+    font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em;
+    text-shadow: 0.08em 0.08em 0 #6b5a00;
+    opacity: 0; transition: opacity 0.12s; z-index: 14;
+  }
+  #combo.show { opacity: 1; }
+
+  /* ---------- СКРЕПКА-ПОМОЩНИК ---------- */
+  #clippy {
+    position: absolute; left: 2%; bottom: 9%;
+    display: none; align-items: flex-end; gap: 0.4em;
+    max-width: 54%; z-index: 16;
+  }
+  #clippy.show { display: flex; }
+  #clippy .clip { width: 2.8em; height: 2.8em; flex: 0 0 auto; }
+  #clippy .bubble {
+    background: var(--white); color: #1a1a2a;
+    padding: 0.5em 0.7em; font-size: 0.62em; line-height: 1.3;
+    border: 0.12em solid var(--teal);
+    border-radius: 0.2em;
+  }
+
+  /* ---------- ЦЕНТРАЛЬНЫЙ БАННЕР «KPI ВЫПОЛНЕНЫ» ---------- */
+  #banner {
+    position: absolute; inset: 0; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; background: rgba(8, 8, 24, 0.6); z-index: 30;
+  }
+  #banner.show { display: flex; }
+  /* Металлическая чеканная плашка с объёмными гранями (стиль NES «ZONE CLEAR») */
+  #banner .plaque {
+    background: #3a5a86;
+    padding: 0.9em 1.4em;
+    border: 0.3em solid;
+    border-color: #6f93c4 #1f3155 #1f3155 #6f93c4;   /* свет сверху-слева, тень снизу-справа */
+    box-shadow: 0 0 0 0.18em #0a1020, 0.45em 0.45em 0 rgba(0,0,0,0.45);
+  }
+  #banner .kpi {
+    color: var(--green); font-weight: bold; letter-spacing: 0.12em;
+    margin-bottom: 0.35em;
+    text-shadow: 0.06em 0.06em 0 #06250a, -0.04em -0.04em 0 #0a3d0a;
+  }
+  #banner .promo { color: var(--yellow); margin-bottom: 0.4em;
+    text-shadow: 0.05em 0.05em 0 #5a4500; }
+  /* Энергичная строка-«GO!!» */
+  #banner .go {
+    color: var(--white); font-weight: bold; font-size: 1.5em; letter-spacing: 0.08em;
+    text-shadow: 0.06em 0 0 var(--red), -0.06em 0 0 var(--red),
+                 0 0.06em 0 var(--red), 0 -0.06em 0 var(--red);
+  }
+
+  /* ---------- ЭКРАН ЗАГРУЗКИ / ОЖИДАНИЯ ---------- */
+  #loading {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 8%; color: var(--ink); line-height: 1.5; z-index: 40;
+  }
+  #loading.hidden { display: none; }
+  #loading .blink { color: var(--yellow); }
+
+  /* ---------- ФИНАЛЬНАЯ МОДАЛКА (победа) ---------- */
+  #modal {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.72);
+    pointer-events: auto; z-index: 50;
+  }
+  #modal.show { display: flex; }
+  #modal .box {
+    width: 80%; max-width: 30em; background: var(--panel);
+    border: 0.18em solid var(--teal);
+    box-shadow: 0 0 0 0.18em var(--bg), 0.5em 0.5em 0 rgba(0,0,0,0.5);
+    padding: 1.4em 1.4em 1.2em; text-align: center; line-height: 1.5;
+  }
+  #modal h2 {
+    margin: 0 0 0.6em; color: var(--yellow);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  #modalText { color: var(--ink); min-height: 7em; }
+  #restartBtn {
+    margin-top: 0.8em; padding: 0.7em 1em; width: 100%; cursor: pointer;
+    color: var(--bg); background: var(--yellow); border: none;
+    border-bottom: 0.25em solid #b89a00;
+    font-family: inherit; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #restartBtn:active { transform: translateY(0.12em); border-bottom-width: 0.13em; }
+
+  /* ---------- КНОПКА ЗВУКА (в строке HUD, после «Офферов») ---------- */
+  #mute {
+    flex: 0 0 auto; align-self: center;
+    width: 1.9em; height: 1.9em; padding: 0.26em;
+    background: var(--bg); border: 0.12em solid var(--line);
+    color: var(--teal); cursor: pointer; pointer-events: auto;
+  }
+  #mute svg { width: 100%; height: 100%; display: block; }
+  #mute .slash { display: none; }
+  #mute.muted { color: #8a8ad6; }
+  #mute.muted .waves { display: none; }
+  #mute.muted .slash { display: block; }
+
+  /* Подсказка по управлению внизу */
+  #help {
+    position: absolute; left: 0; bottom: 0; width: 100%;
+    text-align: center; padding: 0.5% 0;
+    color: var(--white); font-size: 0.62em;
+    text-shadow: 0.08em 0.08em 0 rgba(0,0,0,0.7);
+    text-transform: uppercase; letter-spacing: 0.08em; z-index: 8;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .blink { animation: none !important; }
+  }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  .blink { animation: blink 1s steps(1) infinite; }
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="field">
+    <!-- Верхний корпоративный дашборд -->
+    <div id="hud">
+      <div class="hud-stats">
+        <div class="stat"><div class="label">Откликов</div><div class="value" id="stApplies">247</div></div>
+        <div class="stat"><div class="label">Просмотров</div><div class="value" id="stViews">12</div></div>
+        <div class="stat"><div class="label">Тестовых</div><div class="value" id="stTests">8</div></div>
+        <div class="stat offers"><div class="label">Офферов</div><div class="value" id="stOffers">0</div></div>
+        <button id="mute" title="Звук (M)">
+          <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <polygon points="3,9 3,15 7,15 12,20 12,4 7,9" stroke="none"/>
+            <g class="waves" fill="none">
+              <path d="M15 9 Q18 12 15 15"/>
+              <path d="M17.5 7 Q22 12 17.5 17"/>
+            </g>
+            <line class="slash" x1="15" y1="8" x2="21" y2="16" stroke-width="2"/>
+          </svg>
+        </button>
+      </div>
+      <div class="hud-progress">
+        <div class="plabel"><span>Рассмотрение заявки</span><span id="pCount">0 / 15</span></div>
+        <div class="ptrack"><div class="pfill" id="pFill"></div></div>
+      </div>
+    </div>
+
+    <div id="event"></div>
+    <div id="phrase"></div>
+    <div id="combo"></div>
+
+    <!-- Скрепка-помощник: серая скрепка с глазами (привет Ворду 90-х) -->
+    <div id="clippy">
+      <svg class="clip" viewBox="0 0 24 24">
+        <!-- тело скрепки: две вложенные «петли», металлический серый -->
+        <path d="M8.5 8 v8.5 a3 3 0 0 0 6 0 V6.5 a2 2 0 0 0 -4 0 v9"
+              fill="none" stroke="#b9bcc9" stroke-width="2.6"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M8.5 8 v8.5 a3 3 0 0 0 6 0 V6.5 a2 2 0 0 0 -4 0 v9"
+              fill="none" stroke="#71768c" stroke-width="0.7"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <!-- глаза: белые с тёмными зрачками -->
+        <circle cx="9.6"  cy="6.8" r="2.1" fill="#ffffff" stroke="#23263a" stroke-width="0.7"/>
+        <circle cx="13.4" cy="6.8" r="2.1" fill="#ffffff" stroke="#23263a" stroke-width="0.7"/>
+        <circle cx="10"   cy="7.1" r="0.95" fill="#1a1c2c"/>
+        <circle cx="13.8" cy="7.1" r="0.95" fill="#1a1c2c"/>
+      </svg>
+      <div class="bubble" id="clippyText"></div>
+    </div>
+
+    <!-- Баннер апгрейда HR -->
+    <div id="banner">
+      <div class="plaque">
+        <div class="kpi">KPI ВЫПОЛНЕНЫ</div>
+        <div class="promo" id="bannerPromo"></div>
+        <div class="go">ДАЛЬШЕ!!</div>
+      </div>
+    </div>
+
+    <!-- Экран загрузки/ожидания -->
+    <div id="loading"><div id="loadingText"></div></div>
+
+    <!-- Финальная модалка -->
+    <div id="modal">
+      <div class="box">
+        <h2>Дорогой соискатель!</h2>
+        <div id="modalText"></div>
+        <button id="restartBtn">Отправить ещё 100 откликов</button>
+      </div>
+    </div>
+
+    <div id="help">← → или A / D — движение &nbsp;•&nbsp; ПРОБЕЛ — отправить тестовое &nbsp;•&nbsp; M — звук</div>
+  </div>
+
+<script>
+"use strict";
+/* =====================================================================
+   ПОЙМАЙ HR — вся логика в одном файле, без внешних библиотек.
+   Поле рисуется в виртуальных координатах 256×240 (как у NES) и
+   масштабируется под окно. Главный цикл — requestAnimationFrame с
+   дельтой времени, чтобы скорость не зависела от герцовки монитора.
+   Системы вынесены в независимые блоки: ввод, звук+музыка, фон-офис,
+   снаряды, попадания, комбо, корпоративные ивенты, скрепка, финал.
+   ===================================================================== */
+
+// ----------- Виртуальные размеры поля -----------
+const VW = 256, VH = 240;
+
+// ----------- DOM-ссылки -----------
+const canvas      = document.getElementById("game");
+const ctx         = canvas.getContext("2d");
+const fieldEl     = document.getElementById("field");
+const phraseEl    = document.getElementById("phrase");
+const comboEl     = document.getElementById("combo");
+const eventEl     = document.getElementById("event");
+const bannerEl    = document.getElementById("banner");
+const bannerPromo = document.getElementById("bannerPromo");
+const loadingEl   = document.getElementById("loading");
+const loadingText = document.getElementById("loadingText");
+const modalEl     = document.getElementById("modal");
+const modalText   = document.getElementById("modalText");
+const restartBtn  = document.getElementById("restartBtn");
+const muteBtn     = document.getElementById("mute");
+const clippyEl    = document.getElementById("clippy");
+const clippyText  = document.getElementById("clippyText");
+const stApplies   = document.getElementById("stApplies");
+const stViews     = document.getElementById("stViews");
+const stTests     = document.getElementById("stTests");
+const pFill       = document.getElementById("pFill");
+const pCount      = document.getElementById("pCount");
+
+// Системная настройка «уменьшить движение» — выключаем тряску/мерцание
+const REDUCED = window.matchMedia &&
+                window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// ----------- Палитра для рисования на канвасе -----------
+const COLORS = {
+  bg:"#0d0d2b", white:"#ffffff", red:"#e23636", yellow:"#f7d51d",
+  teal:"#00c8cf", dark:"#0d0d2b",
+  // кожа и её тень
+  skin:"#e8b890", skinShade:"#c9966e",
+  // HR: костюм, очки-«бандана», коричневые волосы, чёрные ботинки
+  hairBrown:"#3a2718", suit:"#1c1c3a", visor:"#15152e", shoes:"#0a0a16",
+  // Дизайнер: рыжие волосы, зелёные глаза, бирюзовая футболка, джинсы, кеды, девайс
+  hairOrange:"#cf6a25", eyeGreen:"#3fa34d", shirtTeal:"#2e8b84",
+  jeans:"#3a5fcd", sneaker:"#f2f2f2", devFrame:"#15152e", devScreen:"#3a6ad6",
+  // фон-город (Денди/Сега-стиль)
+  outline:"#07071a",                       // контур спрайтов
+  sky:"#1a2c66", skyTop:"#24388a",         // ночное небо
+  moon:"#e8e8c4", moonShade:"#c4c49a",
+  bldgFar:"#0f1840", bldgNear:"#15205a",   // силуэты зданий (2 слоя параллакса)
+  win:"#ffd24a", winDim:"#c79a2a",         // горящие окна
+  beam:"#8a3b2a", beamHi:"#bf5a3e", rivet:"#3a160f", // балка под HR
+  floor:"#7a3326", floorHi:"#a85234",      // индустриальный пол
+  crate:"#9a5f2a", crateHi:"#c08443", crateLine:"#5e3a18", // деревянный ящик
+  // снаряд-файл .pptx и кофейный стакан дизайнера
+  pptx:"#c84b25", pptxLight:"#e87a4e", cup:"#eaeaea", coffee:"#5a3418",
+  // (старые офисные цвета больше не нужны, но оставлены для совместимости)
+  deskFar:"#171738", deskNear:"#1f1f47", screen:"#14535a", screenLit:"#1c7a82",
+};
+
+/* =====================================================================
+   ПИКСЕЛЬНЫЕ СПРАЙТЫ (символ = «толстый» пиксель, '.' = прозрачный)
+   Сетка 16×20 — детальнее прежней, чтобы персонажи читались.
+   ===================================================================== */
+
+// HR — корпоративный костюм, тёмные очки-«бандана», красный галстук
+const SPRITE_HR = [
+  "....HHHHHHHH....",  // 1  волосы
+  "...HHHHHHHHHH...",  // 2
+  "..HHHHHHHHHHHH..",  // 3
+  "..HHSSSSSSSSHH..",  // 4  лоб (волосы по бокам)
+  "..HSSSSSSSSSSH..",  // 5
+  "..SSVVVVVVVVSS..",  // 6  тёмные очки
+  "..SSSSSSSSSSSS..",  // 7
+  "..SSSSSNNSSSSS..",  // 8  нос/рот
+  "..SSSSSSSSSSSS..",  // 9  подбородок
+  ".JJJJJJJJJJJJJJ.",  // 10 плечи пиджака
+  ".JJJJWWWWWWJJJJ.",  // 11 воротник (белая рубашка)
+  ".JJJWWWTTWWWJJJ.",  // 12 галстук
+  ".JJJJWWTTWWJJJJ.",  // 13
+  ".JJJJWWTTWWJJJJ.",  // 14
+  ".JJJJJWTTWJJJJJ.",  // 15
+  ".JJJJJJTTJJJJJJ.",  // 16 кончик галстука
+  "..JJJJ....JJJJ..",  // 17 ноги
+  "..JJJJ....JJJJ..",  // 18
+  "..BBBB....BBBB..",  // 19 ботинки
+  "..BBBB....BBBB..",  // 20
+];
+
+// Дизайнер — рыжие волосы, зелёные глаза, бирюзовая футболка, со стаканом кофе
+const SPRITE_PLAYER = [
+  "....OOOOOOOO....",  // 1  волосы
+  "...OOOOOOOOOO...",  // 2
+  "..OOOOOOOOOOOO..",  // 3
+  "..OOSSSSSSSSOO..",  // 4  лоб
+  "..OSSSSSSSSSSO..",  // 5
+  "..SSSGSSSSGSSS..",  // 6  зелёные глаза
+  "..SSSSSSSSSSSS..",  // 7
+  "..SSSSSNNSSSSS..",  // 8  рот
+  "..SSSSSSSSSSSS..",  // 9
+  "..CCCCCCCCCCCC..",  // 10 плечи футболки
+  ".CCCCCCCCCCCCCC.",  // 11
+  ".CCCCCCCCCCCCCC.",  // 12
+  ".CCCCCCCCCCQQQ..",  // 13 кофе (верх стакана)
+  ".CCCCCCCCCSUUUU.",  // 14 рука + стакан + ручка
+  ".CCCCCCCCCCUUU..",  // 15 низ стакана
+  "..DDDDDDDDDDDD..",  // 16 пояс джинсов
+  "..DDDDD..DDDDD..",  // 17 ноги
+  "..DDDDD..DDDDD..",  // 18
+  "..EEEEE..EEEEE..",  // 19 кеды
+  "..RREEE..EEERR..",  // 20 красный носок кед
+];
+
+const LEGEND = {
+  // общее
+  S:COLORS.skin, N:COLORS.skinShade, W:COLORS.white,
+  // HR
+  H:COLORS.hairBrown, V:COLORS.visor, J:COLORS.suit, T:COLORS.red, B:COLORS.shoes,
+  // дизайнер
+  O:COLORS.hairOrange, G:COLORS.eyeGreen, C:COLORS.shirtTeal, D:COLORS.jeans,
+  E:COLORS.sneaker, R:COLORS.red, U:COLORS.cup, Q:COLORS.coffee,
+};
+const SP = 1; // размер спрайт-пикселя в вирт.ед. (герои вдвое меньше: 16×20)
+const PLAYER_W = SPRITE_PLAYER[0].length * SP; // 16
+const PLAYER_H = SPRITE_PLAYER.length    * SP; // 20
+const HR_W     = SPRITE_HR[0].length     * SP; // 16
+const HR_H     = SPRITE_HR.length        * SP; // 20
+
+/* =====================================================================
+   ЗВУК И МУЗЫКА (Web Audio API)
+   Цепочка: источники → musicGain/SFX → masterGain → выход.
+   masterGain служит общим выключателем (кнопка «звук»).
+   ===================================================================== */
+let audioCtx = null, masterGain = null, musicGain = null;
+let muted = false;            // общий выключатель (true = тихо)
+let musicStarted = false;     // запущен ли секвенсор музыки
+let musicTimer = null;        // setInterval планировщика нот
+let nextNoteTime = 0, step16 = 0; // состояние секвенсора
+
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = new AC();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = muted ? 0 : 1;
+    masterGain.connect(audioCtx.destination);
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.05;     // музыка тихая, чтобы не глушить попадания
+    musicGain.connect(masterGain);
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// Разовый звуковой эффект
+function beep(freq, durMs, type = "square", vol = 0.12, startOffset = 0) {
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime + startOffset;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durMs / 1000);
+  osc.connect(gain).connect(masterGain || audioCtx.destination);
+  osc.start(t0); osc.stop(t0 + durMs / 1000 + 0.02);
+}
+
+// Готовые эффекты
+function sndShoot()   { beep(880, 90, "square", 0.07); beep(1320, 60, "square", 0.05, 0.04); }
+function sndHit()     { beep(180, 120, "sawtooth", 0.13); beep(90, 160, "square", 0.09, 0.05); }
+function sndLevelUp() { [523,659,784,1046].forEach((f,i)=>beep(f,120,"square",0.10,i*0.09)); }
+function sndWin()     { [392,349,311,233].forEach((f,i)=>beep(f,220,"triangle",0.12,i*0.18)); }
+function sndType()    { beep(1200, 28, "square", 0.03); } // блип печатающегося текста
+
+// --- Чиптюн: короткий зацикленный мотив (square-мелодия + triangle-бас) ---
+const CHORD_ROOTS = [130.81, 110.00, 87.31, 98.00];           // C3, A2, F2, G2 (по 4 шага)
+const MELODY = [261.63,0,329.63,392.00, 220.00,0,261.63,329.63,
+                174.61,0,220.00,261.63, 196.00,0,246.94,293.66]; // 16 шагов (0 = пауза)
+
+function noteVoice(freq, time, dur, type, vol) {
+  const osc = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  osc.type = type; osc.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(vol, time + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+  osc.connect(g).connect(musicGain);
+  osc.start(time); osc.stop(time + dur + 0.02);
+}
+
+// Длительность одного 16-го; темп слегка растёт с должностью HR (нарастание абсурда)
+function sec16() {
+  const bpm = 112 * (1 + 0.10 * level);
+  return (60 / bpm) / 4;
+}
+
+function scheduler() {
+  if (!audioCtx) return;
+  // Планируем ноты немного вперёд (стандартный приём Web Audio)
+  while (nextNoteTime < audioCtx.currentTime + 0.12) {
+    const s = sec16();
+    if (step16 % 4 === 0) {                       // бас на каждую четверть
+      const root = CHORD_ROOTS[Math.floor(step16 / 4) % 4];
+      noteVoice(root, nextNoteTime, s * 3.2, "triangle", 0.5);
+    }
+    const m = MELODY[step16 % 16];                // мелодия
+    if (m > 0) noteVoice(m, nextNoteTime, s * 0.9, "square", 0.32);
+    nextNoteTime += s;
+    step16 = (step16 + 1) % 16;
+  }
+}
+
+function startMusic() {
+  if (!audioCtx || musicStarted) return;
+  musicStarted = true;
+  nextNoteTime = audioCtx.currentTime + 0.05;
+  step16 = 0;
+  musicTimer = setInterval(scheduler, 25);
+}
+
+// Кнопка звука: общий mute через masterGain
+function setMute(m) {
+  muted = m;
+  muteBtn.classList.toggle("muted", muted);
+  if (masterGain) masterGain.gain.value = muted ? 0 : 1;
+}
+muteBtn.addEventListener("click", () => { ensureAudio(); setMute(!muted); });
+
+/* =====================================================================
+   ФРАЗЫ HR
+   ===================================================================== */
+const PHRASES_COMMON = [
+  "Мы выбрали другого кандидата",
+  "Вернёмся с обратной связью позже",
+  "Мы сохраним ваше резюме в базе",
+  "Руководитель сейчас в отпуске",
+  "Вакансия временно заморожена",
+  "Ваше тестовое понравилось команде",
+];
+const PHRASES_RARE = [
+  "Спасибо за бесплатный аудит интерфейса",
+  "Мы вдохновились некоторыми вашими решениями",
+  "Ваше тестовое помогло нам определиться с дизайном продукта",
+];
+
+// Реплики скрепки-помощника
+const CLIPPY_LINES = [
+  "Не сдавайтесь! Продолжайте отКЛИКаться!",
+  "Кажется, вы ищете работу. Хотите ещё одно тестовое?",
+  "Совет дня: будьте проактивны и стрессоустойчивы!",
+  "Вы уже отправили столько откликов. Так держать!",
+  "Главное — гореть работой. И не выгореть.",
+];
+
+/* =====================================================================
+   СОСТОЯНИЕ ИГРЫ
+   ===================================================================== */
+const HIT_TARGET = 15;
+const HR_SPEEDS  = [1.0, 1.8, 2.7];
+const HR_TITLES  = ["HR", "Senior HR", "HR Director"];
+const BASE_APPLIES = 247, BASE_VIEWS = 12, BASE_TESTS = 8;
+const COMBO_WINDOW = 1500; // мс между попаданиями, пока серия не сбросилась
+
+let state = "loading";     // loading | pitch | playing | kpi | win
+let hits = 0, applies = BASE_APPLIES, views = BASE_VIEWS, tests = BASE_TESTS;
+let level = 0;
+let player, hrX, hrY, hrDir, hrSpeed;
+let projectiles = [], particles = [];
+let lastShot = 0;
+let phraseTimer = null, comboTimer = null;
+const pendingTimers = [];
+
+// Комбо
+let combo = 0, lastHitTime = 0;
+
+// Растущие просмотры
+let nextViewAt = 0;
+
+// Корпоративные ивенты
+let activeEvent = null;      // 'meeting' | 'deadline' | 'retro' | null
+let eventEndAt = 0, nextEventAt = 0;
+let eventSpeedMul = 1, eventHittable = true;
+
+// Скрепка
+let clippyVisible = false, clippyHideAt = 0, nextClippyAt = 0;
+
+// Тряска экрана
+let shakeFrames = 0, shakeX = 0, shakeY = 0;
+
+// Фон-офис (параллакс)
+let officeFar = 0, officeNear = 0;
+
+// Печатающийся финал
+let typeTimer = null;
+
+const keys = { left: false, right: false };
+
+/* =====================================================================
+   МАСШТАБИРОВАНИЕ ПОД ОКНО
+   ===================================================================== */
+let scale = 1, offsetX = 0, offsetY = 0, fieldW = 0, fieldH = 0;
+
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+
+  scale = Math.min(w / VW, h / VH);
+  fieldW = VW * scale; fieldH = VH * scale;
+  offsetX = (w - fieldW) / 2; offsetY = (h - fieldH) / 2;
+
+  fieldEl.style.left = offsetX + "px";
+  fieldEl.style.top = offsetY + "px";
+  fieldEl.style.width = fieldW + "px";
+  fieldEl.style.height = fieldH + "px";
+  fieldEl.style.fontSize = Math.max(10, fieldW * 0.034) + "px";
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+window.addEventListener("resize", resize);
+
+// Виртуальные координаты → экранные (с учётом тряски)
+function vx(x) { return offsetX + shakeX + x * scale; }
+function vy(y) { return offsetY + shakeY + y * scale; }
+function vs(n) { return n * scale; }
+
+/* =====================================================================
+   ВВОД С КЛАВИАТУРЫ + разблокировка звука по первому жесту
+   ===================================================================== */
+function userGesture() {
+  ensureAudio();
+  if (!muted) startMusic();   // музыка стартует по умолчанию при первом действии
+}
+window.addEventListener("pointerdown", userGesture);
+
+window.addEventListener("keydown", (e) => {
+  userGesture();
+  switch (e.code) {
+    case "ArrowLeft": case "KeyA":  keys.left = true;  e.preventDefault(); break;
+    case "ArrowRight": case "KeyD": keys.right = true; e.preventDefault(); break;
+    case "Space": shoot(); e.preventDefault(); break;
+    case "KeyM": setMute(!muted); break;   // быстрый mute
+  }
+});
+window.addEventListener("keyup", (e) => {
+  switch (e.code) {
+    case "ArrowLeft": case "KeyA":  keys.left = false; break;
+    case "ArrowRight": case "KeyD": keys.right = false; break;
+  }
+});
+// Потеря фокуса окна — сброс клавиш (защита от «залипания»)
+window.addEventListener("blur", () => { keys.left = false; keys.right = false; });
+
+/* =====================================================================
+   ОБНОВЛЕНИЕ ДАШБОРДА
+   ===================================================================== */
+function updateHUD() {
+  stApplies.textContent = applies;
+  stViews.textContent   = views;
+  stTests.textContent   = tests;
+  const done = Math.min(hits, HIT_TARGET);
+  pFill.style.width = (done / HIT_TARGET * 100) + "%";
+  pCount.textContent = done + " / " + HIT_TARGET;
+}
+
+/* =====================================================================
+   ИГРОВЫЕ ДЕЙСТВИЯ
+   ===================================================================== */
+function shoot() {
+  if (state !== "playing") return;
+  const now = performance.now();
+  if (now - lastShot < 220) return;     // кулдаун против спама при удержании
+  lastShot = now;
+  projectiles.push({ x: player.x + PLAYER_W/2 - 4, y: player.y - 11, w: 8, h: 10, vy: -4.2 });
+  applies++; updateHUD();               // отклик улетел «в никуда»
+  sndShoot();
+}
+
+function showPhrase() {
+  const pool = Math.random() < 0.10 ? PHRASES_RARE : PHRASES_COMMON;
+  phraseEl.textContent = pool[Math.floor(Math.random() * pool.length)];
+  phraseEl.classList.add("show");
+  if (phraseTimer) clearTimeout(phraseTimer);
+  phraseTimer = setTimeout(() => phraseEl.classList.remove("show"), 1500);
+}
+
+function spawnParticles(cx, cy) {
+  const palette = [COLORS.white, COLORS.red, COLORS.yellow];
+  for (let i = 0; i < 14; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 0.8 + Math.random() * 2.2;
+    particles.push({
+      x: cx, y: cy, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd - 0.5,
+      life: 1, size: 2 + Math.floor(Math.random()*2),
+      color: palette[Math.floor(Math.random()*palette.length)],
+    });
+  }
+}
+
+// Комбо: серия попаданий без длинной паузы → растущая абсурдная похвала
+function bumpCombo() {
+  const now = performance.now();
+  combo = (now - lastHitTime < COMBO_WINDOW) ? combo + 1 : 1;
+  lastHitTime = now;
+  if (combo >= 2) {
+    let praise = "";
+    if (combo === 3) praise = " · ЦЕННЫЙ КАДР";
+    else if (combo === 4) praise = " · ИГРОК КОМАНДЫ";
+    else if (combo >= 5) praise = " · ЛИД ПО ДУХУ";
+    comboEl.textContent = "×" + combo + " КОМБО" + praise;
+    comboEl.classList.add("show");
+    if (comboTimer) clearTimeout(comboTimer);
+    comboTimer = setTimeout(() => comboEl.classList.remove("show"), 900);
+  }
+}
+
+function registerHit() {
+  hits++; tests++;            // попавшее тестовое засчитано
+  updateHUD();
+  bumpCombo();
+  spawnParticles(hrX + HR_W/2, hrY + HR_H/2);
+  if (!REDUCED) shakeFrames = 11;   // тряска экрана (если не отключено системно)
+  sndHit();
+  showPhrase();
+
+  if (hits === 5)  return upgradeHR(1, "HR → Senior HR");
+  if (hits === 10) return upgradeHR(2, "Senior HR → HR Director");
+  if (hits >= HIT_TARGET) return win();
+}
+
+function upgradeHR(newLevel, promoText) {
+  state = "kpi";
+  endEvent();                       // ивент не висит поверх баннера
+  bannerPromo.textContent = promoText;
+  bannerEl.classList.add("show");
+  sndLevelUp();
+  const t = setTimeout(() => {
+    bannerEl.classList.remove("show");
+    level = newLevel;
+    hrSpeed = HR_SPEEDS[level];
+    state = "playing";
+  }, 2000);
+  pendingTimers.push(t);
+}
+
+/* =====================================================================
+   КОРПОРАТИВНЫЕ ИВЕНТЫ — на ~2.5 сек меняют поведение HR
+   ===================================================================== */
+function startEvent() {
+  const kinds = ["meeting", "deadline", "retro"];
+  activeEvent = kinds[Math.floor(Math.random() * kinds.length)];
+  let label = "";
+  if (activeEvent === "meeting")  { eventHittable = false; eventSpeedMul = 1;   label = "HR на встрече"; }
+  if (activeEvent === "deadline") { eventHittable = true;  eventSpeedMul = 1.9; label = "Горящий дедлайн"; }
+  if (activeEvent === "retro")    { eventHittable = true;  eventSpeedMul = 0;   label = "Ретроспектива"; }
+  eventEl.textContent = label;
+  eventEl.classList.add("show");
+  eventEndAt = performance.now() + 2500;
+}
+function endEvent() {
+  activeEvent = null; eventSpeedMul = 1; eventHittable = true;
+  eventEl.classList.remove("show");
+  nextEventAt = performance.now() + 7000 + Math.random() * 4000;
+}
+
+/* =====================================================================
+   СКРЕПКА-ПОМОЩНИК — периодически всплывает с репликой
+   ===================================================================== */
+function showClippy() {
+  clippyText.textContent = CLIPPY_LINES[Math.floor(Math.random() * CLIPPY_LINES.length)];
+  clippyEl.classList.add("show");
+  clippyVisible = true;
+  clippyHideAt = performance.now() + 3200;
+}
+function hideClippy() {
+  clippyEl.classList.remove("show");
+  clippyVisible = false;
+  nextClippyAt = performance.now() + 9000 + Math.random() * 6000;
+}
+
+/* =====================================================================
+   ФИНАЛ — печатающийся текст отказа с блипами
+   ===================================================================== */
+const FINALE = "Благодарим вас за интерес к нашей вакансии и время, которое вы уделили выполнению тестового задания.\n\nМы внимательно изучили вашу работу.\n\nК сожалению, вакансия была закрыта внутренним кандидатом.\n\nЖелаем успехов в дальнейшем поиске работы.";
+
+function typeFinale() {
+  modalText.innerHTML = "";
+  restartBtn.style.display = "none";
+  if (REDUCED) {                        // без анимации — показать сразу
+    modalText.innerHTML = FINALE.replace(/\n/g, "<br>");
+    restartBtn.style.display = "block";
+    return;
+  }
+  let i = 0, shown = "";
+  typeTimer = setInterval(() => {
+    shown += FINALE[i];
+    modalText.innerHTML = shown.replace(/\n/g, "<br>");
+    if (i % 3 === 0 && FINALE[i] !== "\n" && FINALE[i] !== " ") sndType();
+    i++;
+    if (i >= FINALE.length) {
+      clearInterval(typeTimer); typeTimer = null;
+      restartBtn.style.display = "block";
+    }
+  }, 28);
+}
+
+function win() {
+  state = "win";
+  projectiles = [];
+  endEvent();
+  hideClippy();
+  modalEl.classList.add("show");
+  typeFinale();
+  sndWin();
+}
+
+/* =====================================================================
+   ОБНОВЛЕНИЕ ЛОГИКИ (dt ≈ кол-во кадров при 60fps)
+   ===================================================================== */
+function update(dt) {
+  const now = performance.now();
+
+  // --- Фон и тряска живут всегда (даже на баннере/финале) ---
+  if (!REDUCED) {
+    officeFar  = (officeFar  + 0.12 * dt) % 48;
+    officeNear = (officeNear + 0.28 * dt) % 64;
+  }
+  if (shakeFrames > 0) {
+    shakeFrames -= dt;
+    const mag = Math.max(0, shakeFrames / 11) * vs(2.5);
+    shakeX = (Math.random() * 2 - 1) * mag;
+    shakeY = (Math.random() * 2 - 1) * mag;
+  } else { shakeX = shakeY = 0; }
+
+  if (state !== "playing") return;  // дальше — только активная игра
+
+  // --- Растущие просмотры (медленно, сами по себе) ---
+  if (now >= nextViewAt) {
+    views++; updateHUD();
+    nextViewAt = now + 3000 + Math.random() * 4000;
+  }
+
+  // --- Корпоративные ивенты ---
+  if (!activeEvent && now >= nextEventAt) startEvent();
+  if (activeEvent && now >= eventEndAt)   endEvent();
+
+  // --- Скрепка ---
+  if (!clippyVisible && now >= nextClippyAt) showClippy();
+  if (clippyVisible && now >= clippyHideAt)  hideClippy();
+
+  // --- Сброс комбо по таймауту ---
+  if (combo > 0 && now - lastHitTime > COMBO_WINDOW) combo = 0;
+
+  // --- Движение игрока ---
+  const PLAYER_SPEED = 2.4;
+  if (keys.left)  player.x -= PLAYER_SPEED * dt;
+  if (keys.right) player.x += PLAYER_SPEED * dt;
+  player.x = Math.max(2, Math.min(VW - PLAYER_W - 2, player.x));
+
+  // --- Движение HR (с учётом ивента: ускорение/заморозка) ---
+  const effSpeed = hrSpeed * eventSpeedMul;
+  hrX += effSpeed * hrDir * dt;
+  if (hrX <= 2)             { hrX = 2;             hrDir = 1; }
+  if (hrX >= VW - HR_W - 2) { hrX = VW - HR_W - 2; hrDir = -1; }
+
+  // --- Снаряды + коллизии ---
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.y += p.vy * dt;
+    if (p.y + p.h < 0) { projectiles.splice(i, 1); continue; }
+    // Во время «встречи» HR недоступен — снаряд пролетает насквозь
+    if (eventHittable &&
+        p.x < hrX + HR_W && p.x + p.w > hrX &&
+        p.y < hrY + HR_H && p.y + p.h > hrY) {
+      projectiles.splice(i, 1);
+      registerHit();
+      break;
+    }
+  }
+
+  // --- Частицы ---
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    pt.x += pt.vx * dt; pt.y += pt.vy * dt;
+    pt.vy += 0.12 * dt; pt.life -= 0.045 * dt;
+    if (pt.life <= 0) particles.splice(i, 1);
+  }
+}
+
+/* =====================================================================
+   ОТРИСОВКА
+   ===================================================================== */
+const FLOOR_Y = 216;          // верх индустриального пола
+const HR_FEET  = 76;          // уровень балки, по которой ходит HR
+
+// Один силуэт здания с рядами горящих окон (стиль «Чёрного плаща»)
+function drawBuilding(x, baseY, w, h, body, winCol) {
+  ctx.fillStyle = body;
+  ctx.fillRect(vx(x), vy(baseY - h), vs(w), vs(h));
+  // окошки рядами
+  ctx.fillStyle = winCol;
+  for (let wy = baseY - h + 4; wy < baseY - 3; wy += 6) {
+    for (let wx = x + 3; wx < x + w - 3; wx += 6) {
+      // часть окон «погашена» — псевдослучайно, но стабильно
+      if (((wx * 13 + wy * 7) % 5) !== 0) ctx.fillRect(vx(wx), vy(wy), vs(2), vs(3));
+    }
+  }
+}
+
+// Деревянный ящик-крейт (нод к Chip & Dale)
+function drawCrate(x, y, s) {
+  ctx.fillStyle = COLORS.outline; ctx.fillRect(vx(x-1), vy(y-1), vs(s)+2, vs(s)+2);
+  ctx.fillStyle = COLORS.crate;   ctx.fillRect(vx(x), vy(y), vs(s), vs(s));
+  ctx.fillStyle = COLORS.crateHi; ctx.fillRect(vx(x), vy(y), vs(s), vs(2)); // блик сверху
+  ctx.strokeStyle = COLORS.crateLine; ctx.lineWidth = Math.max(1, vs(1));
+  // диагональные доски крест-накрест
+  ctx.beginPath();
+  ctx.moveTo(vx(x), vy(y));        ctx.lineTo(vx(x+s), vy(y+s));
+  ctx.moveTo(vx(x+s), vy(y));      ctx.lineTo(vx(x), vy(y+s));
+  ctx.rect(vx(x), vy(y), vs(s), vs(s));
+  ctx.stroke();
+}
+
+function drawBackground() {
+  // фон + «леттербокс»
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(vx(0), vy(0), vs(VW), vs(VH));
+  ctx.clip();
+
+  // Небо: верхняя полоса чуть светлее (имитация ночного градиента)
+  ctx.fillStyle = COLORS.sky;
+  ctx.fillRect(vx(0), vy(0), vs(VW), vs(VH));
+  ctx.fillStyle = COLORS.skyTop;
+  ctx.fillRect(vx(0), vy(0), vs(VW), vs(90));
+
+  // Луна в правом верхнем углу
+  ctx.fillStyle = COLORS.moon;
+  ctx.beginPath();
+  ctx.arc(vx(210), vy(40), vs(13), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = COLORS.moonShade;          // тень-кратер
+  ctx.beginPath();
+  ctx.arc(vx(214), vy(37), vs(4), 0, Math.PI * 2);
+  ctx.fill();
+
+  // Дальний ряд зданий (мельче/темнее, медленный параллакс)
+  for (let x = -48; x < VW + 48; x += 48) {
+    const xx = x + officeFar - 48;
+    const h = 50 + ((Math.abs(x) * 17) % 36);
+    drawBuilding(xx, FLOOR_Y, 32, h, COLORS.bldgFar, COLORS.winDim);
+  }
+  // Ближний ряд зданий (крупнее/ярче, быстрее)
+  for (let x = -64; x < VW + 64; x += 64) {
+    const xx = x + officeNear - 64;
+    const h = 70 + ((Math.abs(x) * 23) % 44);
+    drawBuilding(xx, FLOOR_Y, 44, h, COLORS.bldgNear, COLORS.win);
+  }
+
+  // Балка-площадка, по которой патрулирует HR (как враги в платформерах)
+  ctx.fillStyle = COLORS.beam;
+  ctx.fillRect(vx(0), vy(HR_FEET), vs(VW), vs(5));
+  ctx.fillStyle = COLORS.beamHi;
+  ctx.fillRect(vx(0), vy(HR_FEET), vs(VW), vs(1));
+  ctx.fillStyle = COLORS.rivet;              // заклёпки
+  for (let rx = 6; rx < VW; rx += 16) ctx.fillRect(vx(rx), vy(HR_FEET + 2), vs(2), vs(2));
+
+  // Индустриальный пол
+  ctx.fillStyle = COLORS.floor;
+  ctx.fillRect(vx(0), vy(FLOOR_Y), vs(VW), vs(VH - FLOOR_Y));
+  ctx.fillStyle = COLORS.floorHi;
+  ctx.fillRect(vx(0), vy(FLOOR_Y), vs(VW), vs(2));
+  ctx.fillStyle = COLORS.rivet;
+  for (let rx = 8; rx < VW; rx += 18) ctx.fillRect(vx(rx), vy(FLOOR_Y + 5), vs(2), vs(2));
+
+  // Пара ящиков на полу (статичный декор)
+  drawCrate(18, FLOOR_Y - 16, 16);
+  drawCrate(VW - 34, FLOOR_Y - 16, 16);
+
+  ctx.restore();
+}
+
+function drawProjectile(p) {
+  const x = vx(p.x), y = vy(p.y), w = vs(p.w), h = vs(p.h);
+  const u = w / 6; // условная «единица» для деталей внутри иконки
+
+  // контур
+  ctx.fillStyle = COLORS.outline;
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  // тело файла — фирменный оранжевый PowerPoint
+  ctx.fillStyle = COLORS.pptx;
+  ctx.fillRect(x, y, w, h);
+  // загнутый светлый уголок справа сверху
+  ctx.fillStyle = COLORS.pptxLight;
+  ctx.fillRect(x + w - u * 2, y, u * 2, u * 2);
+  // буква «P» белым (стойка + «голова»)
+  ctx.fillStyle = COLORS.white;
+  ctx.fillRect(x + u * 1.5, y + h * 0.4, u, h * 0.42);          // вертикальная стойка
+  ctx.fillRect(x + u * 1.5, y + h * 0.4, u * 2.4, u);           // верхняя перекладина
+  ctx.fillRect(x + u * 3.1, y + h * 0.4, u, h * 0.22);          // правая часть «головы»
+  ctx.fillRect(x + u * 1.5, y + h * 0.4 + u * 1.6, u * 2.4, u); // нижняя перекладина «головы»
+}
+
+function drawParticles() {
+  for (const pt of particles) {
+    ctx.globalAlpha = Math.max(0, pt.life);
+    ctx.fillStyle = pt.color;
+    ctx.fillRect(vx(pt.x), vy(pt.y), vs(pt.size), vs(pt.size));
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSpriteScaled(map, x, y, alpha) {
+  const px = vs(SP);
+  ctx.globalAlpha = (alpha == null) ? 1 : alpha;
+  const ox = vx(x), oy = vy(y);
+  const o = Math.max(1, vs(1)); // толщина контура в экранных пикселях
+
+  // Проход 1 — контур: каждый непрозрачный пиксель рисуем чуть крупнее
+  // тёмным цветом. Получается аккуратная обводка по силуэту (стиль Денди).
+  ctx.fillStyle = COLORS.outline;
+  for (let row = 0; row < map.length; row++) {
+    const line = map[row];
+    for (let col = 0; col < line.length; col++) {
+      if (line[col] === ".") continue;
+      ctx.fillRect(ox + col*px - o, oy + row*px - o, px + o*2, px + o*2);
+    }
+  }
+  // Проход 2 — сами цветные пиксели поверх контура
+  for (let row = 0; row < map.length; row++) {
+    const line = map[row];
+    for (let col = 0; col < line.length; col++) {
+      const ch = line[col];
+      if (ch === ".") continue;
+      ctx.fillStyle = LEGEND[ch] || COLORS.white;
+      ctx.fillRect(ox + col*px, oy + row*px, px + 0.6, px + 0.6);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Подпись персонажа: центрированная, с тёмной тенью для читаемости
+function drawLabel(text, cxVirtual, yVirtual, color, baseline) {
+  ctx.font = "bold " + Math.round(vs(7)) + 'px "Courier New", monospace';
+  ctx.textAlign = "center";
+  ctx.textBaseline = baseline;
+  const x = vx(cxVirtual), y = vy(yVirtual);
+  ctx.fillStyle = COLORS.dark;  ctx.fillText(text, x + vs(0.7), y + vs(0.7));
+  ctx.fillStyle = color;        ctx.fillText(text, x, y);
+}
+
+function render() {
+  drawBackground();
+  if (state === "loading" || state === "pitch") return;
+
+  // HR прячется во время «встречи»
+  if (activeEvent !== "meeting") {
+    drawSpriteScaled(SPRITE_HR, hrX, hrY);
+    drawLabel(HR_TITLES[level], hrX + HR_W/2, hrY - 3, COLORS.yellow, "bottom");
+  }
+
+  drawSpriteScaled(SPRITE_PLAYER, player.x, player.y);
+  drawLabel("Дизайнер", player.x + PLAYER_W/2, player.y - 4, COLORS.teal, "bottom");
+
+  for (const p of projectiles) drawProjectile(p);
+  drawParticles();
+}
+
+/* =====================================================================
+   ГЛАВНЫЙ ЦИКЛ
+   ===================================================================== */
+let lastTime = performance.now();
+function loop(now) {
+  let dt = (now - lastTime) / (1000 / 60);
+  if (dt > 3) dt = 3;
+  lastTime = now;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   ИНИЦИАЛИЗАЦИЯ / РЕСТАРТ
+   ===================================================================== */
+function startGame() {
+  while (pendingTimers.length) clearTimeout(pendingTimers.pop());
+  if (phraseTimer) { clearTimeout(phraseTimer); phraseTimer = null; }
+  if (comboTimer)  { clearTimeout(comboTimer);  comboTimer = null; }
+  if (typeTimer)   { clearInterval(typeTimer);  typeTimer = null; }
+
+  hits = 0; applies = BASE_APPLIES; views = BASE_VIEWS; tests = BASE_TESTS;
+  level = 0; hrSpeed = HR_SPEEDS[0]; hrDir = 1;
+  hrX = VW/2 - HR_W/2; hrY = HR_FEET - HR_H;          // HR стоит на балке
+  player = { x: VW/2 - PLAYER_W/2, y: FLOOR_Y - PLAYER_H }; // игрок стоит на полу
+  projectiles = []; particles = [];
+  keys.left = keys.right = false;
+  combo = 0; lastHitTime = 0;
+  shakeFrames = 0; shakeX = shakeY = 0;
+
+  // Сброс таймеров систем (отсчёт от текущего момента)
+  const now = performance.now();
+  nextViewAt   = now + 4000;
+  activeEvent  = null; eventSpeedMul = 1; eventHittable = true;
+  nextEventAt  = now + 6000 + Math.random() * 3000;
+  clippyVisible = false; nextClippyAt = now + 7000 + Math.random() * 4000;
+
+  // Прячем оверлеи
+  modalEl.classList.remove("show");
+  bannerEl.classList.remove("show");
+  phraseEl.classList.remove("show");
+  comboEl.classList.remove("show");
+  eventEl.classList.remove("show");
+  clippyEl.classList.remove("show");
+  updateHUD();
+
+  // Стартовая заставка
+  state = "loading";
+  loadingEl.classList.remove("hidden");
+  loadingText.innerHTML = 'Загрузка вакансии<span class="blink">...</span>';
+  const t1 = setTimeout(() => {
+    state = "pitch";
+    loadingText.innerHTML =
+      'На вакансию уже откликнулось<br><span style="font-size:2em;font-weight:bold;color:var(--yellow);text-shadow:0.06em 0.06em 0 #5a4500">1837</span><br>человек';
+  }, 1000);
+  pendingTimers.push(t1);
+  const t2 = setTimeout(() => {
+    loadingEl.classList.add("hidden");
+    state = "playing";
+    // С момента старта игры перезапускаем отсчёт «живых» таймеров
+    const t = performance.now();
+    nextViewAt = t + 4000;
+    nextEventAt = t + 6000 + Math.random() * 3000;
+    nextClippyAt = t + 7000 + Math.random() * 4000;
+  }, 3000);
+  pendingTimers.push(t2);
+}
+
+restartBtn.addEventListener("click", () => { userGesture(); startGame(); });
+
+// Старт
+resize();
+startGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
