@@ -245,12 +245,16 @@
     }
     .tbtn:active { background: rgba(0,200,207,0.4); }
     #btnFire {
-      width: 5em; height: 5em; font-size: 0.85em;
+      width: 5.4em; height: 5.4em; font-size: 0.62em;
       color: var(--yellow); border-color: var(--yellow);
+      text-align: center; line-height: 1.1;
     }
     #help { display: none; }   /* на тач-устройствах подсказку с клавишами прячем */
-    /* Скрепыш — над левыми кнопками движения, чтобы они его не перекрывали */
-    #clippy { left: 2%; bottom: 27%; top: auto; max-width: 62%; }
+    /* Скрепыш — над левыми кнопками; вертикальный отступ ≈ горизонтальному
+       зазору между кнопками (визуально ритмично), крупнее, пузырь не лезет в центр */
+    #clippy { left: 3%; bottom: 30%; top: auto; max-width: 46%; gap: 0.45em; }
+    #clippy .clip { width: 3.6em; height: 3.6em; }
+    #clippy .bubble { font-size: 0.82em; padding: 0.6em 0.8em; }
   }
   /* Подсказка повернуть телефон, если экран вертикальный */
   #rotate { display: none; }
@@ -263,6 +267,17 @@
     }
     #touch { display: none; } /* в портрете кнопки не показываем */
   }
+
+  /* Мини-подсказка по управлению при старте (показывается на мобиле, гаснет сама) */
+  #hint {
+    position: absolute; left: 50%; top: 32%; transform: translateX(-50%);
+    display: none; opacity: 0; transition: opacity 0.35s; z-index: 24;
+    pointer-events: none; white-space: nowrap;
+    background: rgba(8,8,24,0.88); color: var(--white);
+    border: 0.14em solid var(--teal); padding: 0.6em 1em;
+    font-size: 0.85em; letter-spacing: 0.04em; text-align: center;
+  }
+  #hint.show { display: block; opacity: 1; }
 </style>
 </head>
 <body>
@@ -294,6 +309,7 @@
     </div>
 
     <div id="event"></div>
+    <div id="hint">◀ ▶ — ходить&nbsp;&nbsp;·&nbsp;&nbsp;SEND PDF — отправить тестовое</div>
     <div id="phrase"></div>
     <div id="combo"></div>
 
@@ -344,7 +360,7 @@
         <button class="tbtn" id="btnRight" aria-label="Вправо">▶</button>
       </div>
       <div class="tbtns">
-        <button class="tbtn" id="btnFire" aria-label="Отправить тестовое">PPTX</button>
+        <button class="tbtn" id="btnFire" aria-label="Отправить PDF">Send PDF</button>
       </div>
     </div>
 
@@ -385,6 +401,7 @@ const restartBtn  = document.getElementById("restartBtn");
 const muteBtn     = document.getElementById("mute");
 const clippyEl    = document.getElementById("clippy");
 const clippyText  = document.getElementById("clippyText");
+const hintEl      = document.getElementById("hint");
 const stApplies   = document.getElementById("stApplies");
 const stViews     = document.getElementById("stViews");
 const stTests     = document.getElementById("stTests");
@@ -673,9 +690,11 @@ function isMobile() {
 
 // Вертикальные ориентиры пропорциональны высоте поля — работает при любом VH.
 // На десктопе (VH=240) дают ровно прежние 216 и 76.
+// На мобиле балку HR опускаем ниже: дашборд занимает заметную долю короткого
+// поля, и при 76/240 HR уходил под HUD.
 function layout() {
   FLOOR_Y = Math.round(VH * 216 / 240);
-  HR_FEET = Math.round(VH * 76 / 240);
+  HR_FEET = Math.round(VH * (isMobile() ? 0.42 : 76 / 240));
 }
 
 function resize() {
@@ -705,9 +724,10 @@ function resize() {
   fieldEl.style.top = offsetY + "px";
   fieldEl.style.width = fieldW + "px";
   fieldEl.style.height = fieldH + "px";
-  // Размер шрифта оверлеев привязан к ВЫСОТЕ поля: на широком мобильном
-  // экране HUD не разрастается и не наезжает на персонажей.
-  fieldEl.style.fontSize = Math.max(10, fieldH * 0.037) + "px";
+  // Размер шрифта оверлеев привязан к ВЫСОТЕ поля; на мобиле крупнее —
+  // чтобы дашборд и подсказки читались с телефона.
+  const fontK = isMobile() ? 0.046 : 0.037;
+  fieldEl.style.fontSize = Math.max(10, fieldH * fontK) + "px";
 
   // Если игра уже идёт — держим персонажей на их «дорожках» и в границах поля
   if (player) {
@@ -945,11 +965,14 @@ function win() {
 function update(dt) {
   const now = performance.now();
 
-  // --- Фон и тряска живут всегда (даже на баннере/финале) ---
-  if (!REDUCED) {
-    officeFar  = (officeFar  + 0.12 * dt) % 48;
-    officeNear = (officeNear + 0.28 * dt) % 64;
-  }
+  // --- Фон (параллакс домов) живёт всегда; на мобиле — заметно живее.
+  // Раньше движение глушилось настройкой «уменьшить движение» — убрал,
+  // т.к. остальная анимация её и так не учитывает (это было непоследовательно).
+  const parallaxF = (VW / VW_BASE) * (isMobile() ? 1.8 : 1);
+  officeFar  = (officeFar  + 0.12 * parallaxF * dt) % 48;
+  officeNear = (officeNear + 0.28 * parallaxF * dt) % 64;
+
+  // Тряска при попадании (её «уменьшить движение» по-прежнему гасит)
   if (shakeFrames > 0) {
     shakeFrames -= dt;
     const mag = Math.max(0, shakeFrames / 11) * vs(2.5);
@@ -1067,7 +1090,7 @@ function drawBackground() {
   ctx.fillRect(vx(0), vy(0), vs(VW), vs(VH * 0.375));
 
   const k = VH / VH_BASE;          // коэффициент высоты (1 на десктопе, <1 на мобиле)
-  const moonX = VW - 46, moonY = Math.round(VH / 6);
+  const moonX = VW - 46, moonY = Math.round(VH * (isMobile() ? 0.30 : 1 / 6));
 
   // Луна в правом верхнем углу
   ctx.fillStyle = COLORS.moon;
@@ -1108,9 +1131,14 @@ function drawBackground() {
   ctx.fillStyle = COLORS.rivet;
   for (let rx = 8; rx < VW; rx += 18) ctx.fillRect(vx(rx), vy(FLOOR_Y + 5), vs(2), vs(2));
 
-  // Пара ящиков на полу (статичный декор)
-  drawCrate(18, FLOOR_Y - 16, 16);
-  drawCrate(VW - 34, FLOOR_Y - 16, 16);
+  // Пара ящиков на полу (на мобиле — ближе к центру, чтобы не прятались за кнопками)
+  if (isMobile()) {
+    drawCrate(Math.round(VW * 0.28), FLOOR_Y - 16, 16);
+    drawCrate(Math.round(VW * 0.66), FLOOR_Y - 16, 16);
+  } else {
+    drawCrate(18, FLOOR_Y - 16, 16);
+    drawCrate(VW - 34, FLOOR_Y - 16, 16);
+  }
 
   ctx.restore();
 }
@@ -1195,7 +1223,8 @@ function render() {
   }
 
   drawSpriteScaled(SPRITE_PLAYER, player.x, player.y);
-  drawLabel("Дизайнер", player.x + PLAYER_W/2, player.y - 4, COLORS.teal, "bottom");
+  // Подпись «Дизайнер» — только на десктопе (на мобиле мелкое поле, и так понятно)
+  if (!isMobile()) drawLabel("Дизайнер", player.x + PLAYER_W/2, player.y - 4, COLORS.teal, "bottom");
 
   for (const p of projectiles) drawProjectile(p);
   drawParticles();
@@ -1246,6 +1275,7 @@ function startGame() {
   comboEl.classList.remove("show");
   eventEl.classList.remove("show");
   clippyEl.classList.remove("show");
+  hintEl.classList.remove("show");
   updateHUD();
 
   // Стартовая заставка
@@ -1266,6 +1296,12 @@ function startGame() {
     nextViewAt = t + 4000;
     nextEventAt = t + 6000 + Math.random() * 3000;
     nextClippyAt = t + 7000 + Math.random() * 4000;
+    // Мини-подсказка по управлению — только на мобиле, гаснет сама
+    if (isMobile()) {
+      hintEl.classList.add("show");
+      const th = setTimeout(() => hintEl.classList.remove("show"), 4000);
+      pendingTimers.push(th);
+    }
   }, 3000);
   pendingTimers.push(t2);
 }
