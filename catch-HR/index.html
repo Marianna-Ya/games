@@ -130,6 +130,7 @@
     padding: 0.5em 0.7em; font-size: 0.62em; line-height: 1.3;
     border: 0.12em solid var(--teal);
     border-radius: 0.2em;
+    margin-left: -0.6em;   /* подтягиваем текст ближе к скрепке (закон близости) */
   }
 
   /* ---------- ЦЕНТРАЛЬНЫЙ БАННЕР «KPI ВЫПОЛНЕНЫ» ---------- */
@@ -234,21 +235,22 @@
       padding: 0 3% 3%; pointer-events: none; z-index: 22;
     }
     .tbtns { display: flex; gap: 0.7em; }
+    /* Размер кнопки задаётся в em от ОБЩЕГО (наследуемого) шрифта поля —
+       поэтому все три кнопки одинаковые. Размер стрелок/текста внутри
+       задаётся у вложенных span и на габариты кнопки не влияет. */
     .tbtn {
-      width: 3.8em; height: 3.8em; pointer-events: auto;
+      width: 3.9em; height: 3.9em; pointer-events: auto;
       background: rgba(22,22,58,0.72); color: var(--teal);
       border: 0.14em solid var(--teal); border-radius: 0.4em;
-      font-size: 1.3em; font-weight: bold;
+      font-weight: bold;
       display: flex; align-items: center; justify-content: center;
       user-select: none; -webkit-user-select: none;
       -webkit-tap-highlight-color: transparent;
     }
+    .tbtn .ico { font-size: 1.7em; line-height: 1; }
+    .tbtn .lbl { font-size: 0.82em; line-height: 1.05; text-align: center; }
     .tbtn:active { background: rgba(0,200,207,0.4); }
-    #btnFire {
-      width: 5.4em; height: 5.4em; font-size: 0.62em;
-      color: var(--yellow); border-color: var(--yellow);
-      text-align: center; line-height: 1.1;
-    }
+    #btnFire { color: var(--yellow); border-color: var(--yellow); }
     #help { display: none; }   /* на тач-устройствах подсказку с клавишами прячем */
     /* Скрепыш — над левыми кнопками; вертикальный отступ ≈ горизонтальному
        зазору между кнопками (визуально ритмично), крупнее, пузырь не лезет в центр */
@@ -268,14 +270,14 @@
     #touch { display: none; } /* в портрете кнопки не показываем */
   }
 
-  /* Мини-подсказка по управлению при старте (показывается на мобиле, гаснет сама) */
+  /* Мини-подсказка по управлению при старте (на мобиле, крупно по центру, гаснет сама) */
   #hint {
-    position: absolute; left: 50%; top: 32%; transform: translateX(-50%);
+    position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%);
     display: none; opacity: 0; transition: opacity 0.35s; z-index: 24;
-    pointer-events: none; white-space: nowrap;
-    background: rgba(8,8,24,0.88); color: var(--white);
-    border: 0.14em solid var(--teal); padding: 0.6em 1em;
-    font-size: 0.85em; letter-spacing: 0.04em; text-align: center;
+    pointer-events: none; max-width: 84%; text-align: center;
+    background: rgba(8,8,24,0.9); color: var(--white);
+    border: 0.16em solid var(--teal); padding: 0.9em 1.2em;
+    font-size: 1.25em; line-height: 1.4; letter-spacing: 0.04em;
   }
   #hint.show { display: block; opacity: 1; }
 </style>
@@ -309,7 +311,7 @@
     </div>
 
     <div id="event"></div>
-    <div id="hint">◀ ▶ — ходить&nbsp;&nbsp;·&nbsp;&nbsp;SEND PDF — отправить тестовое</div>
+    <div id="hint">◀ ▶ — ходить&nbsp;&nbsp;·&nbsp;&nbsp;SEND PPTX — отправить тестовое</div>
     <div id="phrase"></div>
     <div id="combo"></div>
 
@@ -356,15 +358,15 @@
     <!-- Экранные кнопки управления (видны только на тач-устройствах) -->
     <div id="touch">
       <div class="tbtns">
-        <button class="tbtn" id="btnLeft" aria-label="Влево">◀</button>
-        <button class="tbtn" id="btnRight" aria-label="Вправо">▶</button>
+        <button class="tbtn" id="btnLeft" aria-label="Влево"><span class="ico">◀</span></button>
+        <button class="tbtn" id="btnRight" aria-label="Вправо"><span class="ico">▶</span></button>
       </div>
       <div class="tbtns">
-        <button class="tbtn" id="btnFire" aria-label="Отправить PDF">Send PDF</button>
+        <button class="tbtn" id="btnFire" aria-label="Отправить тестовое"><span class="lbl">Send<br>PPTX</span></button>
       </div>
     </div>
 
-    <div id="help">← → или A / D — движение &nbsp;•&nbsp; ПРОБЕЛ — отправить тестовое &nbsp;•&nbsp; M — звук</div>
+    <div id="help">← → или A / D — движение &nbsp;•&nbsp; ПРОБЕЛ — отправить тестовое</div>
   </div>
 
 <script>
@@ -1299,7 +1301,7 @@ function startGame() {
     // Мини-подсказка по управлению — только на мобиле, гаснет сама
     if (isMobile()) {
       hintEl.classList.add("show");
-      const th = setTimeout(() => hintEl.classList.remove("show"), 4000);
+      const th = setTimeout(() => hintEl.classList.remove("show"), 6000);
       pendingTimers.push(th);
     }
   }, 3000);
